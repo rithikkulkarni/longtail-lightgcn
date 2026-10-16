@@ -55,6 +55,7 @@ Every meaningful design decision for this project, with the options considered, 
 - **Choice:** guarded normalization: degree 0 gets a normalization factor of 0 (no NaN or inf). The data build reports how many items have zero train edges per split.
 - **Options:** (A) guard in the math, keep the split purely random; (B) constrain the split so every item has at least one train edge.
 - **Why:** keeps the split purely random and avoids hiding cold-in-train items, which Intervention C is meant to help.
+- **Observed (M1, 5 splits):** 114 items have exactly 1 rating overall; 22-31 of 3,706 items (<1%) have zero train edges per split.
 - **Revisit when:** we see the real counts. Intervention A (`|N(i)|^-γ`) and B (`pop(i)^-β`) will also need a degree-0 rule; decide in M4.
 
 ### D-08 · Parsing library — **Decided** (2026-10-16)

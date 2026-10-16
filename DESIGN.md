@@ -85,6 +85,10 @@ Every meaningful design decision for this project, with the options considered, 
 - **Why:** closest to "unmodified LightGCN" in the proposal; least tuning needed.
 - **Tradeoff / Revisit:** these were tuned on Gowalla / Yelp2018 / Amazon-Book, not ML-1M, so may be suboptimal. Fairness question for M5: if the baseline is tuned, the interventions must get the same tuning budget, otherwise the comparison favors one side.
 - **Early stopping (decided 2026-10-16):** authors' schedule: evaluate every 20 epochs, stop after 5 consecutive evaluations without improvement. The authors use the **test** set for this; we use **validation** Recall@20 and touch test only at the end.
+- **Amendment for the first full baseline run (2026-10-16, user's choice "B"):** evaluate every 5 epochs with patience 20 (`--eval_every 5 --patience 20`). Same effective patience as the authors (100 epochs after the peak) but a finer validation curve. Purpose: learn the shape of the curve (when it peaks, how noisy) before choosing a cheaper stopping rule for the M5 grid.
+- **Options considered:** (A) authors' 20 x 5; (B) 5 x 20; (C) 5 x 5, which cuts patience to 25 epochs and saves ~75 epochs (~26 min at 21 s/epoch) per run but risks stopping before the true peak and so weakening the control.
+- **Rule for later:** whatever stopping rule is used for the final experiments must be identical for every configuration. Revisit in M5 by replaying the logged curve.
+- **Measured (2026-10-16, Kaggle GPU):** ~21 s/epoch (vs. ~341 s on CPU). Minimum run ~120 epochs (~45 min); worst case 1,000 epochs (~6 h). This makes the full M5 grid (configs x splits x seeds) expensive; see P-06.
 
 ### D-13 · Evaluation protocol — **Decided** (2026-10-16)
 - **Choice:** full ranking over all 3,706 items; mask train items for validation, train + val items for test; K = 20 for now (final K for all metrics is an M3 decision).
@@ -152,6 +156,9 @@ Every meaningful design decision for this project, with the options considered, 
 
 ### P-05 · Does Intervention B's weight apply to the L2 term? (M4b)
 - B reweights each sample's BPR loss by `pop(i)^-beta`. The L2 term (D-15) is per-sample too; decide whether to weight it as well. Affects how strongly popular vs. tail embeddings are regularized.
+
+### P-06 · Grid cost at the measured training speed (M5)
+- At ~21 s/epoch, one run is likely 1-3 hours (unknown until the first full run finishes). 8 on/off combinations plus a gamma/beta sweep, times 3-5 splits, times 3-5 seeds could be hundreds of runs. The planning assumption "each run takes minutes on a T4" does not hold unless runs converge much faster than expected. Decide in M5: epoch budget, stopping rule, which parts of the grid to run, and whether to speed up training.
 
 ### P-04 · Experiment tracking (M5)
 - Per-run results rows (config, seed, split, git commit, metrics) plus Kaggle "Save Version". Whether to add a tool such as Weights & Biases is an M5 decision.

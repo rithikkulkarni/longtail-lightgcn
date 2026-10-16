@@ -1,4 +1,4 @@
-# ROADMAP — Combating Popularity Bias in LightGCN
+﻿# ROADMAP — Combating Popularity Bias in LightGCN
 
 Source of truth for scope: `longtail_lightgcn_proposal.pdf`. Working rules: `CLAUDE.md`.
 
@@ -146,7 +146,4 @@ Per-sample weight `w(i) = pop(i)^-β` on the positive item (Eq. 2).
 
 ## Decision log
 
-_Empty. Each decision is added here, with date and rationale, once the user has made it._
-
-| Date | Milestone | Decision | Options considered | Rationale |
-|------|-----------|----------|--------------------|-----------|
+All design decisions, with options and rationale, are recorded in [DESIGN.md](DESIGN.md).

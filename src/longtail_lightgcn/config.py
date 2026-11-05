@@ -9,6 +9,15 @@ class TrainConfig:
     n_layers: int = 3
     init_std: float = 0.01  # Normal(0, init_std), as in the authors' official code (D-14)
 
+    # Intervention A: degree-discounted aggregation, gamma in [0, 1]; 0 = baseline (D-26)
+    gamma: float = 0.0
+
+    # Intervention B: popularity-aware loss re-weighting, w(i) = pop(i)^-beta, beta in [0, 1]; 0 = baseline (D-27)
+    beta: float = 0.0
+
+    # Intervention C: content-based item embeddings, e_i^(0) = e_i^ID + f_theta(x_i); False = baseline (D-28)
+    use_content: bool = False
+
     # optimization
     lr: float = 1e-3
     l2_reg: float = 1e-4  # weight on the batch-level L2 term (D-15)

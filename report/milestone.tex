@@ -1,0 +1,194 @@
+\documentclass{article}
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+
+\title{Combating Popularity Bias in Graph-Based Collaborative Filtering: Interventions for LightGCN \\ \large Project Milestone Report}
+
+\author{%
+  Rithik Kulkarni \\
+  Department of Computer Science\\
+  North Carolina State University\\
+  Raleigh, NC 27606 \\
+  \texttt{rrkulka3@ncsu.edu}
+}
+
+\begin{document}
+
+\maketitle
+
+% =====================================================================
+\section{Problem Description and Motivation}
+
+Recommender systems commonly represent user--item interactions as a bipartite graph and use graph neural networks to predict which unseen items a user will prefer. LightGCN \citep{he2020lightgcn} simplified Neural Graph Collaborative Filtering (NGCF) \citep{wang2019ngcf} by removing feature-transformation matrices and nonlinear activations, keeping only normalized neighborhood aggregation and a weighted combination of embeddings across layers. This fixed a training-difficulty problem, but it does not address \emph{popularity bias}: an item's embedding is a sum over its neighboring users, so high-degree items take part in many more aggregation steps and their embeddings are reinforced at every layer regardless of whether a particular user would prefer them \citep{klimashevskaia2024survey}. Because this bias lives in the graph convolution itself, simplifying NGCF into LightGCN does nothing to remove it, and LightGCN has also been shown to behave inconsistently across the graph in ways that may compound it \citep{lee2024revisiting}.
+
+\paragraph{Project goal.} Rather than propose a new architecture, this project studies a mix-and-match of three small interventions on LightGCN, each targeting popularity bias at a different stage of the pipeline: (A) degree-discounted aggregation, (B) popularity-aware loss re-weighting, and (C) content-based initialization of item embeddings. The central question is the accuracy--bias trade-off (Recall versus Gini) of the baseline, each intervention alone, and all combinations. The hypothesis is that the combined method achieves a better trade-off than baseline LightGCN.
+
+\paragraph{Milestone status.} The data pipeline and the baseline LightGCN (training, evaluation, and a first full baseline run on a Kaggle GPU) are complete and unit-tested. The remaining metrics, the three interventions, and the experiment grid are in progress; Section~\ref{sec:plan} gives the plan.
+
+% =====================================================================
+\section{Dataset and Processing}
+
+\paragraph{Dataset.} I use MovieLens-1M \citep{harper2015movielens}: 1,000,209 ratings from 6,040 users on movies, together with item metadata (title, which includes the release year, and genres). It was not used in the original LightGCN paper. I chose it because it also provides the content metadata that Intervention C requires.
+
+\paragraph{Implicit feedback.} Every rating is converted to a positive edge (rating $\geq 1$), giving a bipartite user--item graph with about 1.0M edges. The study concerns \emph{whether} a user interacted with an item rather than whether they liked it; this also matches the implicit-feedback convention for LightGCN and the proposal's ``roughly 1 million ratings''. The accepted trade-off is that a 1-star rating becomes a positive, so the model learns what users chose to watch. Item degrees computed from these edges define popularity for Interventions A and B and for the Gini metric.
+
+\paragraph{Item catalog and filtering.} Of the 3,883 movies in \texttt{movies.dat}, only 3,706 appear in the ratings; the 177 unrated movies are removed from the graph and catalog, because they can never be evaluated and would distort Coverage and Gini denominators. (Metadata for all movies is kept, with an \texttt{in\_catalog} flag.) I apply \emph{no} k-core filtering: low-degree items are precisely what this project studies, and ML-1M already guarantees every user at least 20 ratings. Raw IDs are remapped to contiguous indices, giving 6,040 users and 3,706 items (9,746 graph nodes). The pipeline checks that no (user, item) pair is duplicated.
+
+\paragraph{Splits.} Each user's interactions are shuffled and split 80/10/10 into train/validation/test (per-user random split, the standard LightGCN protocol). The holdout size per user is $\lfloor 0.1 n + 0.5 \rfloor$ (half-up rounding), and the remainder is training data. Five splits are generated, one per seed, and saved so that all experiments use identical data; repeated splits guard against conclusions that depend on one lucky split. The accepted trade-offs are that the split ignores time and that test sets from different seeds can overlap. Because no filtering is applied, 22--31 of the 3,706 items (under 1\%) have zero training edges in a given split; 114 items have exactly one rating overall. Normalization handles degree-0 nodes with a guard (factor set to 0) rather than producing NaN or infinity. These cold-in-train items are intentionally kept, since Intervention C is meant to help them.
+
+\paragraph{Graph construction.} From the \emph{training edges only} (using validation or test edges would leak into propagation and inflate Recall), I build the symmetric normalized adjacency
+\begin{equation}
+\hat{A} = D^{-1/2} A D^{-1/2}, \qquad A = \begin{pmatrix} 0 & R \\ R^\top & 0 \end{pmatrix},
+\end{equation}
+where $R \in \{0,1\}^{6040 \times 3706}$ is the training interaction matrix, stored as a PyTorch sparse COO tensor. Tests check that $\hat{A}$ is symmetric, that normalization matches a hand-computed example, and that there is no train/validation/test leakage.
+
+% =====================================================================
+\section{Model Design and Metrics}
+
+\subsection{Baseline: LightGCN}
+The baseline is implemented from scratch in PyTorch (no existing LightGCN library). Users and items have learnable ID embeddings $e_u^{(0)}, e_i^{(0)} \in \mathbb{R}^{64}$, initialized from $\mathcal{N}(0, 0.01^2)$ as in the authors' official code. Propagation is
+\begin{equation}
+e_u^{(k+1)} = \sum_{i \in \mathcal{N}(u)} \frac{1}{\sqrt{|\mathcal{N}(u)||\mathcal{N}(i)|}}\, e_i^{(k)}, \qquad
+e_i^{(k+1)} = \sum_{u \in \mathcal{N}(i)} \frac{1}{\sqrt{|\mathcal{N}(i)||\mathcal{N}(u)|}}\, e_u^{(k)},
+\end{equation}
+with $K=3$ layers, and the final embedding is the mean over layers $0$ through $K$, $e = \frac{1}{K+1}\sum_{k=0}^{K} e^{(k)}$. A user--item score is the inner product $y_{ui} = e_u^\top e_i$. Training uses the Bayesian Personalized Ranking loss \citep{rendle2012bpr},
+\begin{equation}
+\mathcal{L}_{\text{BPR}} = -\sum_{(u,i,j)} \ln \sigma(y_{ui} - y_{uj}) + \lambda\, \tfrac{1}{2}\big(\lVert e_u^{(0)} \rVert^2 + \lVert e_i^{(0)} \rVert^2 + \lVert e_j^{(0)} \rVert^2\big) / B,
+\end{equation}
+where $i$ is an observed item, $j$ a sampled negative, and $B$ the batch size. The L2 term is applied only to the layer-0 embeddings of the nodes in the current batch (the authors' form), so regularization strength scales with how often a row is updated; weight decay over all rows would shrink rarely seen tail items at the same per-step rate as popular ones and would add popularity bias to the baseline itself. Negatives are sampled uniformly from all items, one per positive per epoch, and redrawn if the user has the item in \emph{training}; they are never checked against validation or test data to avoid leakage. (Popularity-proportional negative sampling was rejected because it would act as an uncontrolled debiasing intervention inside the baseline.)
+
+\paragraph{Hyperparameters.} I use the authors' README settings: Adam, learning rate $10^{-3}$, $\lambda = 10^{-4}$, batch size 2048, up to 1000 epochs. Model selection uses \emph{validation} Recall@20, evaluated every 5 epochs with early stopping after 20 evaluations without improvement (patience of 100 epochs), and the test set is touched only once, with the best validation weights. These hyperparameters were tuned on Gowalla, Yelp2018, and Amazon-Book, not ML-1M, so they may be suboptimal here; if the baseline is later tuned, the interventions must receive the same tuning budget.
+
+\subsection{Intervention A: Degree-Discounted Aggregation}
+A tunable discount on high-degree items is added to the item-update direction of propagation:
+\begin{equation}
+e_i^{(k+1)} = \sum_{u \in \mathcal{N}(i)} \frac{1}{\sqrt{|\mathcal{N}(u)||\mathcal{N}(i)|}} \cdot |\mathcal{N}(i)|^{-\gamma}\, e_u^{(k)}, \qquad \gamma \in [0, 1].
+\end{equation}
+Equivalently, the propagation matrix is $S\hat{A}$ with $S$ diagonal (1 for users, $|\mathcal{N}(i)|^{-\gamma}$ for items), so $\gamma = 0$ recovers the baseline exactly. Because only the item-update direction is scaled, the resulting propagation matrix is no longer symmetric; this is a deliberate consequence of Eq.~(1) of the proposal and will be stated explicitly in the analysis. A rule for degree-0 items is still to be decided.
+
+\subsection{Intervention B: Popularity-Aware Loss Re-weighting}
+Each triple's BPR term is weighted by the inverse popularity of its positive item:
+\begin{equation}
+\mathcal{L} = -\sum_{(u,i,j)} w(i) \ln \sigma(y_{ui} - y_{uj}), \qquad w(i) = \mathrm{pop}(i)^{-\beta}, \quad \beta \in [0,1],
+\end{equation}
+where $\mathrm{pop}(i)$ is the training-set degree. $\beta = 0$ recovers the baseline. Open design questions are weight normalization (so the effective loss scale does not change with $\beta$), whether the weight also applies to the L2 term, and the degree-0 rule.
+
+\subsection{Intervention C: Content-Based Cold-Item Initialization}
+Layer-0 item embeddings are augmented with a function of item metadata:
+\begin{equation}
+e_i^{(0)} = e_i^{\mathrm{ID}} + f_\theta(x_i),
+\end{equation}
+where $x_i$ concatenates a genre one-hot encoding with a normalized release year (parsed from the title) and $f_\theta$ is a small MLP. This gives items with few or no training edges a meaningful starting position in embedding space. The MLP architecture, the handling of missing years, and the learning rate for $f_\theta$ remain to be decided.
+
+\subsection{Evaluation Metrics}
+All ranking is \emph{full ranking} over the 3,706 catalog items, with training items masked for validation and training plus validation items masked for test (sampled evaluation is avoided because it can give misleading comparisons). Recall@20 is implemented; the others are planned and will be unit-tested on toy data with known answers.
+\begin{itemize}
+  \item \textbf{Recall@$K$} (implemented): per user, hits in the top-$K$ divided by the number of held-out items, averaged over users with at least one held-out item. Here $K=20$.
+  \item \textbf{NDCG@$K$} (planned): ranking accuracy that rewards placing held-out items higher in the list.
+  \item \textbf{Coverage} (planned): the fraction of the 3,706-item catalog that appears in at least one user's top-$K$ list.
+  \item \textbf{Average Recommendation Popularity} (planned): mean training degree of recommended items.
+  \item \textbf{Gini coefficient} (planned): inequality of item exposure, computed over recommendation counts for all catalog items (including items recommended zero times); 0 means perfectly uniform exposure and values near 1 mean a few items receive almost all exposure.
+\end{itemize}
+The exact definitions of Gini, Coverage, and Average Recommendation Popularity, and the final value(s) of $K$, will be fixed when these metrics are implemented.
+
+% =====================================================================
+\section{Preliminary Baseline Results}
+
+The baseline was trained on a Kaggle GPU on split 0 with model seed 0 (code commit \texttt{aeb4a65}), at about 21.6 seconds per epoch. Training stopped early at epoch 390 (about 2.3 hours); the best validation Recall@20 was at epoch 290.
+
+\begin{table}[h]
+  \caption{Baseline LightGCN on MovieLens-1M (split 0, seed 0, $K=20$). Single run; no error bars yet.}
+  \label{tab:baseline}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Quantity & Value \\
+    \midrule
+    Best epoch (validation-selected) & 290 \\
+    Validation Recall@20 & 0.2492 \\
+    Test Recall@20 & 0.2733 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[h]
+  \caption{Training curve for the baseline (every 5 epochs; selected epochs shown).}
+  \label{tab:curve}
+  \centering
+  \begin{tabular}{rccc}
+    \toprule
+    Epoch & BPR loss & L2 term & Val.\ Recall@20 \\
+    \midrule
+    5   & 0.3484 & 4.57   & 0.1133 \\
+    50  & 0.2055 & 35.60  & 0.1982 \\
+    100 & 0.1736 & 57.71  & 0.2230 \\
+    200 & 0.1333 & 102.13 & 0.2416 \\
+    290 & 0.1075 & 143.56 & 0.2492 \\
+    390 & 0.0945 & 175.32 & 0.2462 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Training BPR loss falls monotonically while validation Recall@20 rises quickly, plateaus near epoch 280--330, and then drifts slightly down, which is consistent with mild overfitting and indicates that early stopping behaves as intended. Test Recall@20 (0.2733) is higher than validation (0.2492) for this split; test is evaluated with both training and validation items masked, so the candidate set differs slightly, and with a single run I make no claim about the gap. Since the original LightGCN paper did not use ML-1M, there is no directly comparable published number, so I treat this only as a loose sanity check against ranges reported by other work on ML-1M with random splits. A more careful reference (for example a popularity baseline) has not been added. These are the control numbers against which the interventions will be compared.
+
+% =====================================================================
+\section{Plan and Remaining Work}
+\label{sec:plan}
+
+\begin{enumerate}
+  \item \textbf{Metrics:} implement and unit-test NDCG, Coverage, Average Recommendation Popularity, and Gini, and report all of them for the baseline.
+  \item \textbf{Interventions:} implement A, B, and C one at a time, each behind a config flag, and verify that $\gamma = 0$, $\beta = 0$, and C-off reproduce the baseline exactly under the same seed.
+  \item \textbf{Experiment grid:} run the $2^3$ on/off combinations plus sweeps over $\gamma$ and $\beta$, over multiple splits and seeds, with hyperparameters selected on validation only and the same tuning budget for every configuration.
+  \item \textbf{Analysis:} plot Recall versus Gini with the Pareto frontier, break results down by head/mid/tail items, report mean $\pm$ std over seeds, and test the hypothesis honestly, including if it does not hold.
+\end{enumerate}
+
+\paragraph{Compute risk.} The proposal assumed the full grid would take a few hours of GPU time. At about 21.6 s/epoch and a single run taking roughly 2 hours, the full grid (configurations $\times$ splits $\times$ seeds) would cost far more. I will time a single run first, then reduce the cost with a cheaper stopping rule (identical for every configuration), a reduced grid, or faster training.
+
+\bibliographystyle{plainnat}
+\begin{thebibliography}{9}
+
+\bibitem[He et al.(2020)]{he2020lightgcn}
+He, X., Deng, K., Wang, X., Li, Y., Zhang, Y., \& Wang, M. (2020).
+LightGCN: Simplifying and powering graph convolution network for recommendation.
+\textit{Proceedings of the 43rd International ACM SIGIR Conference}, 639--648.
+
+\bibitem[Wang et al.(2019)]{wang2019ngcf}
+Wang, X., He, X., Wang, M., Feng, F., \& Chua, T.-S. (2019).
+Neural graph collaborative filtering.
+\textit{Proceedings of the 42nd International ACM SIGIR Conference}, 165--174.
+
+\bibitem[Rendle et al.(2012)]{rendle2012bpr}
+Rendle, S., Freudenthaler, C., Gantner, Z., \& Schmidt-Thieme, L. (2012).
+BPR: Bayesian personalized ranking from implicit feedback.
+\textit{arXiv preprint arXiv:1205.2618}.
+
+\bibitem[Harper \& Konstan(2015)]{harper2015movielens}
+Harper, F. M., \& Konstan, J. A. (2015).
+The MovieLens datasets: History and context.
+\textit{ACM Transactions on Interactive Intelligent Systems}, 5(4), 1--19.
+
+\bibitem[Lee et al.(2024)]{lee2024revisiting}
+Lee, G., Kim, K., \& Shin, K. (2024).
+Revisiting LightGCN: Unexpected inflexibility, inconsistency, and a remedy towards improved recommendation.
+\textit{Proceedings of the 18th ACM Conference on Recommender Systems (RecSys)}, 957--962.
+
+\bibitem[Klimashevskaia et al.(2024)]{klimashevskaia2024survey}
+Klimashevskaia, A., Jannach, D., Elahi, M., \& Trattner, C. (2024).
+A survey on popularity bias in recommender systems.
+\textit{User Modeling and User-Adapted Interaction}, 34(5), 1777--1834.
+
+\end{thebibliography}
+
+\end{document}

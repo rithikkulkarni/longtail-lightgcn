@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 
 from longtail_lightgcn.config import TrainConfig
+from longtail_lightgcn.data.features import load_item_features
 from longtail_lightgcn.data.preprocess import load_split
 from longtail_lightgcn.train import evaluate, train
 
@@ -24,6 +25,15 @@ def git_commit() -> str:
         return ""
 
 
+def _str_to_bool(s: str) -> bool:
+    """argparse's type=bool treats any non-empty string (even "False") as True, so parse explicitly."""
+    if s.lower() in ("true", "1", "yes"):
+        return True
+    if s.lower() in ("false", "0", "no"):
+        return False
+    raise argparse.ArgumentTypeError(f"expected true/false, got {s!r}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data_dir", default="data/processed")
@@ -31,7 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--device", default="auto", help="'auto' uses CUDA when available")
     default_cfg = TrainConfig()
     for f in fields(TrainConfig):  # one flag per config field, defaulting to the dataclass value
-        ap.add_argument(f"--{f.name}", type=type(getattr(default_cfg, f.name)), default=None)
+        typ = type(getattr(default_cfg, f.name))
+        ap.add_argument(f"--{f.name}", type=_str_to_bool if typ is bool else typ, default=None)
     return ap
 
 
@@ -44,7 +55,8 @@ def main(argv=None) -> dict:
     split, n_users, n_items = load_split(Path(args.data_dir) / f"split_{cfg.split_seed}.npz")
     print(f"device={device}  users={n_users}  items={n_items}  config={asdict(cfg)}")
 
-    result = train(split, n_users, n_items, cfg, device=device)
+    features = load_item_features(Path(args.data_dir) / "items.csv") if cfg.use_content else None
+    result = train(split, n_users, n_items, cfg, device=device, item_features=features)
     # the test set is touched exactly once, with the best (validation-selected) weights
     test_recall = evaluate(result.model, result.adj, split, cfg.k, "test")
     print(f"best epoch {result.best_epoch} | val recall@{cfg.k} {result.best_val_recall:.4f} | test recall@{cfg.k} {test_recall:.4f}")

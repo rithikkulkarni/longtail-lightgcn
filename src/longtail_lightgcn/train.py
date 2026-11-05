@@ -9,7 +9,7 @@ import torch
 from longtail_lightgcn.config import TrainConfig
 from longtail_lightgcn.data.adjacency import build_norm_adj
 from longtail_lightgcn.evaluate import recall_at_k
-from longtail_lightgcn.losses import bpr_loss, l2_reg
+from longtail_lightgcn.losses import bpr_loss, l2_reg, pop_weights
 from longtail_lightgcn.model import LightGCN
 from longtail_lightgcn.sampler import NegativeSampler
 
@@ -39,18 +39,25 @@ def evaluate(model: LightGCN, adj: torch.Tensor, split: dict, k: int, which: str
     return recall_at_k(user_final, item_final, k, exclude, target)
 
 
-def train(split: dict, n_users: int, n_items: int, cfg: TrainConfig, device: str = "cpu", log=print) -> TrainResult:
+def train(
+    split: dict, n_users: int, n_items: int, cfg: TrainConfig, device: str = "cpu", log=print, item_features=None
+) -> TrainResult:
+    """`item_features` (n_items, F) is required when cfg.use_content is on (Intervention C) and ignored otherwise."""
+    if cfg.use_content and item_features is None:
+        raise ValueError("cfg.use_content is on but no item_features were given")
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
 
-    adj = build_norm_adj(split["train_users"], split["train_items"], n_users, n_items).to(device)
-    model = LightGCN(n_users, n_items, cfg.embed_dim, cfg.n_layers, cfg.init_std).to(device)
+    adj = build_norm_adj(split["train_users"], split["train_items"], n_users, n_items, cfg.gamma).to(device)
+    feats = torch.as_tensor(item_features, dtype=torch.float32) if cfg.use_content else None
+    model = LightGCN(n_users, n_items, cfg.embed_dim, cfg.n_layers, cfg.init_std, item_features=feats).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     sampler = NegativeSampler(split["train_users"], split["train_items"], n_users, n_items, seed=cfg.seed)
 
     users_all = torch.as_tensor(split["train_users"], dtype=torch.long, device=device)
     items_all = torch.as_tensor(split["train_items"], dtype=torch.long, device=device)
     n_edges = len(users_all)
+    item_w = pop_weights(split["train_items"], n_items, cfg.beta).to(device)  # Intervention B, from train degrees
 
     best_recall, best_epoch, best_state, stale = -1.0, 0, None, 0
     history = []
@@ -71,7 +78,7 @@ def train(split: dict, n_users: int, n_items: int, cfg: TrainConfig, device: str
             pos_scores = model.score(user_final, item_final, u, i)
             neg_scores = model.score(user_final, item_final, u, j)
 
-            bpr = bpr_loss(pos_scores, neg_scores)
+            bpr = bpr_loss(pos_scores, neg_scores, item_w[i])  # weight by the positive item only (Eq. 2)
             reg = l2_reg(model.user_emb(u), model.item_emb(i), model.item_emb(j))
             loss = bpr + cfg.l2_reg * reg
 

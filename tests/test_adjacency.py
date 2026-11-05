@@ -70,3 +70,37 @@ def test_real_split_shape_and_nnz():
     assert adj.shape == (n_users + n_items, n_users + n_items)
     assert adj._nnz() == 2 * len(split["train_users"])
     assert torch.isfinite(adj.values()).all()
+
+
+# --- Intervention A: degree-discounted aggregation (D-26) ---
+
+def test_gamma_zero_matches_baseline_exactly():
+    # S = I, so every value is multiplied by exactly 1.0: bitwise equal, not just close
+    base = build_norm_adj(USERS, ITEMS, 3, 3).to_dense()
+    zero = build_norm_adj(USERS, ITEMS, 3, 3, gamma=0.0).to_dense()
+    assert torch.equal(base, zero)
+
+
+def test_gamma_discount_matches_hand_computation():
+    # Item rows are scaled by deg(i)^-gamma; user rows are untouched. Degrees: i0=1, i1=3.
+    gamma = 0.5
+    expected = expected_tiny()
+    expected[3, :] *= 1 ** -gamma  # item 0 row
+    expected[4, :] *= 3 ** -gamma  # item 1 row
+    adj = build_norm_adj(USERS, ITEMS, 3, 3, gamma=gamma)
+    np.testing.assert_allclose(adj.to_dense().numpy(), expected, atol=1e-6)
+
+
+def test_gamma_makes_matrix_asymmetric_but_keeps_user_rows():
+    dense = build_norm_adj(USERS, ITEMS, 3, 3, gamma=1.0).to_dense()
+    base = build_norm_adj(USERS, ITEMS, 3, 3).to_dense()
+    assert not torch.allclose(dense, dense.T)
+    assert torch.equal(dense[:3], base[:3])  # users are not discounted
+    assert dense[4, 0] < base[4, 0]  # the popular item (degree 3) is discounted
+    assert torch.equal(dense[3], base[3])  # degree-1 item: 1^-gamma = 1, unchanged
+
+
+def test_gamma_degree_zero_item_stays_finite_and_zero():
+    dense = build_norm_adj(USERS, ITEMS, 3, 3, gamma=1.0).to_dense()
+    assert torch.isfinite(dense).all()
+    assert dense[5].abs().sum() == 0 and dense[:, 5].abs().sum() == 0

@@ -131,6 +131,102 @@ Every meaningful design decision for this project, with the options considered, 
 
 ---
 
+## M3 — Metrics
+
+Metrics are exactly the five in the proposal: Recall, NDCG, Coverage, Average Recommendation Popularity (ARP), Gini. Implemented in `metrics.py`.
+
+### D-21 · K — **Decided** (2026-11-04)
+- **Choice:** K = 20 only. **Options:** K=20; K=10 and 20; K=10, 20, 50.
+- **Why:** matches the baseline run and M2. **Tradeoff accepted:** no check that the bias results hold across list lengths (Coverage, ARP and Gini all depend strongly on K).
+
+### D-22 · Gini definition — **Decided** (2026-11-04)
+- **Choice:** Gini of item exposure (number of users' top-K lists containing the item) over **all 3,706 catalog items, zeros included**. Sorted-values formula `sum (2i-n-1) x_(i) / (n sum x)`. Range 0 to (n-1)/n.
+- **Rejected:** over recommended items only. A model recommending the same 50 items to everyone would score a perfect 0, rewarding collapse, and the item set would change per configuration.
+- **Tradeoff accepted:** overlaps with Coverage (low coverage raises Gini). With K=20 a good model still has a Gini well above 0, so read changes relative to the baseline.
+
+### D-23 · ARP definition — **Decided** (2026-11-04)
+- **Choice:** mean raw training degree of recommended items, **plus** the same statistic for each user's held-out test items as a reference (per user first, then averaged over users with held-out items).
+- **Correction:** the ROADMAP listed "per user then averaged vs. pooled" as a choice. With exactly K items per user the two are identical for recommendations, so it is not a real choice there. It does matter for the held-out reference (users have different numbers of test items), which is why that one is per-user.
+- **Options rejected:** raw degree only; degree divided by number of users.
+
+### D-24 · Coverage denominator — **Decided** (2026-11-04)
+- **Choice:** all 3,706 catalog items (consistent with D-04). **Rejected:** only items with at least one train edge, which would make the denominator vary by split and exclude the cold items Intervention C targets.
+
+### D-25 · Recall and NDCG normalization — **Decided** (2026-11-04)
+- **Recall:** hits / number of held-out items (D-18 confirmed). Keeps the existing baseline test Recall@20 of 0.2733 comparable and matches the LightGCN reference code. **Caveat for the report:** users with more than K held-out items cannot reach recall 1, which lowers absolute Recall equally for every configuration.
+- **NDCG:** binary relevance, log2 discount, ideal list capped at min(K, number of held-out items), so a perfect ranking scores 1.
+- Users with no held-out items are skipped for Recall and NDCG; Coverage, Gini and ARP use all users.
+
+---
+
+## M4 — Interventions
+
+Standing rule from the user (2026-11-04): follow the proposal as written; deviate only where necessary. Where the proposal is silent, take the smallest change from the existing code.
+
+### D-26 · Intervention A: degree-discounted aggregation — **Decided** (2026-11-04)
+- **Choices:**
+  1. **Where:** fold the discount into the adjacency, built once (`build_norm_adj(..., gamma)` returns `S @ A_hat`). `model.py` and the training loop are unchanged. The alternative, scaling inside `propagate`, has identical math for one gamma but touches the model and runs every step; it would only be needed for per-layer or learned gamma.
+  2. **Direction and layers:** Eq. 1 literally: item-update direction only, at every layer. The propagation matrix is therefore **asymmetric** (user rows unscaled). Rejected: a symmetric version (also discount item->user), which is a different intervention from the proposed one; first-layer-only.
+  3. **No re-normalization.** Eq. 1 has none. (Re-normalizing each item row by its own sum would cancel the discount exactly; only a global rescale would be meaningful, and the proposal has none.) **Consequence:** popular items' propagated embeddings shrink, so overall embedding scale changes with gamma, which interacts with the learning rate and the L2 term. Layer 0 is never discounted and is part of the layer mean, so the effect is partial.
+  4. **Degree-0 items (P-02, resolved for A):** scale factor 0, consistent with D-07. It never affects the output, since a degree-0 item's row is already all zeros; the guard only avoids `0 * inf = NaN`.
+  5. **Config:** `gamma` added to `TrainConfig` (default 0.0), so `run_baseline` gets `--gamma` for free.
+- **Evaluation uses the same discounted adjacency as training** (the adjacency is part of the model's propagation).
+- **Verified:** gamma=0 gives a bitwise-identical adjacency to the committed baseline (checked against the pre-change `adjacency.py` on a random 300x500 graph); hand-computed gamma=0.5 on the tiny graph; asymmetry; no NaN with a degree-0 item; training with gamma=0.5 differs from baseline and still learns.
+- **Update (2026-11-04):** a 30-epoch training run on the planted test dataset with gamma=0, beta=0 gives bitwise-identical loss, L2 and Recall histories to the committed pre-intervention code (run from a `git archive` of HEAD). **Still not verified:** the real ML-1M baseline (Recall 0.2733) was not rerun on Kaggle.
+
+### D-27 · Intervention B: popularity-aware loss re-weighting — **Decided** (2026-11-04)
+- **Choices (all follow the proposal literally, per the standing rule):**
+  1. **No weight normalization:** raw `w(i) = pop(i)^-beta`. **Flagged confound:** with raw weights the average weight falls well below 1 as beta rises (at beta=1 from 1 for rare items to about 1/2,700 for the most popular), shrinking the BPR term while the L2 term keeps its fixed lambda. Adam probably cancels a uniform loss rescale (untested), but the BPR/L2 balance shifts, so B's measured effect mixes "less popular-item gradient" with "relatively stronger regularization". Rejected option: rescale weights to mean 1 over train edges (a constant factor, keeps the balance, but deviates from Eq. 2); per-batch weight normalization.
+  2. **L2 term is not weighted** (Eq. 2 touches only the BPR term; P-05 resolved). Popular items' BPR gradient shrinks while their regularization stays at baseline strength, an extra downward pull on them that is part of B's measured effect. Rejected: weighting the L2 term per sample.
+  3. **Reduction:** weighted sum divided by batch size, like the baseline's mean. Necessary, not a free choice: the proposal's plain sum would scale BPR by the batch size relative to L2 and break beta=0 reproducing the baseline.
+  4. **`pop(i)` = training degree**, same quantity as in A and ARP. Never 0 for a weighted item (a positive is a train edge), so the degree-0 question (P-02) does not arise for B; `pop_weights` clamps at 1 only to avoid inf for unused items.
+  5. **Weight applies to the positive item only**; negatives are unweighted (as in Eq. 2). `beta` added to `TrainConfig` (default 0.0).
+- **Implementation:** `pop_weights` computes per-item weights once from train degrees; `bpr_loss(pos, neg, weights)` multiplies each sample's term by its weight and takes the mean.
+- **Consequence for logging:** the logged `bpr_loss` is the weighted loss, so it is not comparable across different beta values.
+- **Property:** total gradient mass per item over an epoch is about `deg^(1-beta)`: proportional to popularity at beta=0, equal across items at beta=1.
+- **Verified:** hand-computed weighted loss; unit weights bitwise equal to unweighted; gradient scales with the weight; weights decrease with popularity; beta=0 gives exactly 1; training with beta=0.5 differs from baseline and still learns; gamma=0, beta=0 reproduce committed baseline training bitwise (above).
+
+### D-28 · Intervention C: content-based item embeddings — **Decided** (2026-11-04)
+- **Eq. 3:** `e_i^(0) = e_i^ID + f_theta(x_i)` for **every** item (not the threshold idea in P-01). `f_theta` is trained jointly with everything else by the same BPR loss, in the same optimizer step; there is no pretraining and no extra loss.
+- **Choices:**
+  1. **MLP:** one hidden layer, ReLU, hidden width 64, output = embed_dim, no dropout ("lightweight MLP"; the proposal gives no details). 5,440 parameters at embed_dim 64 and 19 input features. Rejected: linear-only (not an MLP), deeper or dropout.
+  2. **Genres:** multi-hot over the 18 ML-1M genres. **Interpretation flagged:** the proposal says "one-hot", but real movies average 1.67 genres (max 6), so a strict one-hot would drop information; multi-hot is the standard reading of one-hot encoding for multi-label data. Rejected: one-hot of the first listed genre only.
+  3. **Year:** parsed from the last "(YYYY)" in the title, min-max scaled to [0, 1] over the catalog (range 1919-2000). Missing years would be filled with the mean year; **in ML-1M there are none** (0 of 3,883 titles).
+  4. **Optimization:** the MLP's weights join the existing Adam optimizer at the same learning rate, with no extra regularization. The L2 term (D-15) still penalizes only the ID embeddings. Rejected: separate learning rate, weight decay on the MLP, L2 on the combined embedding.
+  5. **Init scale:** PyTorch default init for the MLP (smallest change). **Measured on real features:** the initial MLP output has std about 0.12 versus 0.01 for the ID embeddings (D-14), so early in training the content part dominates every item's layer-0 embedding, not only cold items. Not corrected, to stay with the default. If C looks odd in M5, shrinking the last layer's init is the first thing to try.
+  6. **Off switch:** `use_content` (default False). When off, no MLP is created, so the model and its random init are the baseline's, bit for bit.
+- **Mechanics:** the item features are a fixed non-persistent buffer (not saved in `model.pt`, rebuilt from `items.csv` at load time); the MLP is built after the embeddings so the ID init is unchanged by C. Features are built in `data/features.py` from `items.csv`, catalog items only, ordered by item index.
+- **CLI fix:** `run_baseline` flags for boolean fields now parse "True"/"False" properly (`type=bool` would treat "False" as True).
+- **Cold items:** a zero-train-degree item has all-zero propagated layers, so its final embedding is `e^(0) / (K+1)`; with C that is dominated by `f_theta(x)`, which other items trained. Whether this helps is **not evaluated here**: there are only 22-31 such items per split, and the head/mid/tail breakdown is M6.
+- **Verified:** feature parsing hand-computed on a tiny table and run on the real items table (3,706 x 19, no NaN); layer-0 is ID + MLP; gradients reach both the MLP and the ID embeddings; MLP weights move during training; training with C differs from baseline and still learns the planted structure; C-off model and training are bitwise identical to the committed baseline (checked against a `git archive` of HEAD with all of A, B, C off); CLI bool parsing; end-to-end CLI run with C on.
+- **Not verified:** that C improves anything on real ML-1M, and no full real-data training run has been done locally (about 340 s/epoch on CPU).
+
+---
+
+## M5 — Experiment grid
+
+### D-29 · Grid shape — **Decided** (2026-11-05); stopping rule and dial selection still **Open**
+- **Constraint:** 12 days in total, and a Kaggle GPU quota believed to be about 30 GPU-hours a week (unverified), at about 21.6 s/epoch (P-06). The proposal's "a few hours total" does not hold: one run is about 1.2 h at 200 epochs.
+- **Choice (option Y):**
+  - **Stage 1** (split 0, model seed 0, selection on validation only): baseline, C alone, A alone at gamma in {0.25, 0.5, 0.75}, B alone at beta in {0.25, 0.5, 0.75}. 8 runs.
+  - **Stage 2:** all 8 on/off combinations of A, B, C (baseline, A, B, C, AB, AC, BC, ABC) at the chosen gamma\* and beta\*, on **2 repeats** (repeat r = saved split r and model seed r, r in {0, 1}). The split-0 runs of baseline, A, B and C come from stage 1, so 12 are new.
+  - **Total: 20 runs** (about 24 GPU-hours at 200 epochs, 18 h at 150).
+- **Dropped:** gamma = 1 and beta = 1, so the tested range is [0.25, 0.75] and not the proposal's full [0, 1]; the report must say so. Rationale: beta = 1 is where un-normalized weights are most confounded with the L2 term (D-27) and gamma = 1 is the likeliest to be degenerate; they only save 2 runs, so they can be added back at the end if quota remains. Also dropped: the 5-value sweeps, a joint gamma x beta cross, and the third repeat.
+- **What the repeats are:** independent models, each on its own random 80/10/10 split (D-02), reporting mean and spread. Not cross-validation, no ensembling. Split and seed vary together, so their effects are not separated. All 8 configurations share the same splits, enabling same-split comparisons.
+- **Statistical caveat to state in the report:** a spread from 2 points is unreliable, so report both values or the range. A third split (5 more runs: baseline, A, B, C, ABC) can be added last if the 2-split gap looks too close to the effect sizes.
+- **Second caveat:** gamma\* and beta\* are chosen on split 0's validation set, so split 0 is slightly matched to the tuned configurations. Validation and test are different edges, so this is not leakage.
+- **Decided (2026-11-05):**
+  - **Epoch budget:** fixed 200 epochs for every run, evaluated every 10, best-validation checkpoint kept, no early stopping (identical for all configs, D-12). Reason: the baseline did not peak until epoch 290, so a shorter budget is hard to justify; 200 epochs reaches about 97% of the baseline's best validation Recall (0.2416 vs 0.2492). **Risk accepted:** a configuration that converges more slowly is cut off and may be penalized.
+  - **Saved per run:** one metrics row (validation and test, all five metrics) plus the top-20 recommendation lists (about 0.5 MB), so M6's head/mid/tail breakdown needs no further GPU time.
+  - **Persistence across Kaggle sessions:** `results/results.jsonl` and the recommendation files live in the repo; after each session the user downloads the output and commits it; the next session clones the repo and skips finished runs.
+  - **Choosing gamma\* and beta\* (2026-11-05):** among the stage 1 dial values (0.25, 0.5, 0.75), pick the one with the **lowest validation Gini whose validation Recall@20 is within 5% (relative) of the stage 1 baseline's**. A and B are chosen separately, each against the same baseline run. **Fallback:** if no value is within 5%, pick 0.25 and print a warning. A `select_dials` step prints the choice and writes `results/dials.json` for the user to review and commit before stage 2.
+    - **Rejected:** highest validation Recall (almost always the weakest dial, so the combined method would barely differ from the baseline and the hypothesis could not be tested); fixed 0.5 with the sweep only as the trade-off curve (no justification beyond being the middle).
+    - **Caveats:** the 5% tolerance is a judgment call that cannot be derived; stage 1 is one run per dial value, so the Recall comparison is noisy at the margin; A and B together may lose more than 5%, which stage 2 will show. **Sensitivity:** every stage 1 run is logged, so the report can show what a 3% or 10% tolerance would have picked.
+  - **Runs per Kaggle session (2026-11-05):** one. The runner (`run_grid`) takes `--max_runs N` (default 1) and does the next N unfinished runs in a fixed order; `--run_id` runs one named run; `--max_hours` stops before a run that would not fit. Reason: a crashed or timed-out session then loses at most one run (about 1.2 h), which matters because it is **unverified** whether Kaggle keeps the output of a session that dies. **Cost accepted:** about 20 manual download/commit cycles and a few minutes of setup per session (unmeasured). One notebook, `notebooks/grid_run.ipynb`, is saved as a new version each time, not 20 separate notebooks.
+- **Implementation notes:** a run's identity is `g<gamma>_b<beta>_c<0|1>_s<split>` (model seed = split), so runs shared by both stages (split 0 of baseline, A, B, C) are trained once. Rows whose epoch budget is not 200 never count as finished and are ignored by `select_dials`, so a smoke run cannot pollute the grid. Each row holds validation and test values of all five metrics plus the held-out popularity reference, the config, the git commit and the validation history; the test top-20 lists go to `recs/<key>.npz` as int16.
+
+---
+
 ## Infrastructure
 
 ### D-11 · Code organization and where to run — **Decided** (2026-10-16)

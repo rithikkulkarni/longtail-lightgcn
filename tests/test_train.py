@@ -68,3 +68,21 @@ def test_test_set_is_only_touched_on_request():
     val = evaluate(result.model, result.adj, split, 10, "val")
     test = evaluate(result.model, result.adj, split, 10, "test")
     assert 0.0 <= test <= 1.0 and val != test
+
+
+def test_gamma_changes_training_but_still_learns():
+    # Intervention A: a discounted adjacency must change the run, yet the model must still learn the planted signal
+    base, _ = run(small_cfg(max_epochs=20))
+    disc, _ = run(small_cfg(max_epochs=20, gamma=0.5))
+    assert [h["bpr_loss"] for h in base.history] != [h["bpr_loss"] for h in disc.history]
+    full, _ = run(small_cfg(gamma=0.5))
+    assert full.best_val_recall > 0.15
+
+
+def test_beta_changes_training_but_still_learns():
+    # Intervention B: re-weighting must change the run, yet the model must still learn the planted signal
+    base, _ = run(small_cfg(max_epochs=20))
+    weighted, _ = run(small_cfg(max_epochs=20, beta=0.5))
+    assert [h["bpr_loss"] for h in base.history] != [h["bpr_loss"] for h in weighted.history]
+    full, _ = run(small_cfg(beta=0.5))
+    assert full.best_val_recall > 0.15

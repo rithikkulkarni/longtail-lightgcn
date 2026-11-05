@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from longtail_lightgcn.losses import bpr_loss, l2_reg
+from longtail_lightgcn.losses import bpr_loss, l2_reg, pop_weights
 
 
 def test_equal_scores_give_log_two():
@@ -56,3 +56,41 @@ def test_l2_reg_gradient_is_embedding_over_batch_size():
     n = torch.zeros(2, 2, requires_grad=True)
     l2_reg(u, p, n).backward()
     assert torch.allclose(u.grad, u.detach() / 2)
+
+
+# --- Intervention B: popularity-aware loss re-weighting (D-27) ---
+
+def test_weighted_loss_matches_hand_computation():
+    # pair 1: pos=2, neg=0, w=0.5 -> 0.5 * log(1 + e^-2); pair 2: pos=0, neg=0, w=2 -> 2 * log 2
+    # divided by the batch size (2), like the baseline's mean
+    loss = bpr_loss(torch.tensor([2.0, 0.0]), torch.tensor([0.0, 0.0]), torch.tensor([0.5, 2.0]))
+    expected = (0.5 * math.log(1 + math.exp(-2)) + 2.0 * math.log(2)) / 2
+    assert math.isclose(loss.item(), expected, rel_tol=1e-6)
+
+
+def test_unit_weights_are_bitwise_identical_to_unweighted():
+    pos, neg = torch.randn(64), torch.randn(64)
+    assert torch.equal(bpr_loss(pos, neg), bpr_loss(pos, neg, torch.ones(64)))
+
+
+def test_weight_scales_the_gradient_of_its_own_sample():
+    # d/dpos of w * softplus(neg - pos) at equal scores = -w * 0.5; mean over 2 pairs halves it
+    pos = torch.zeros(2, requires_grad=True)
+    neg = torch.zeros(2, requires_grad=True)
+    bpr_loss(pos, neg, torch.tensor([1.0, 0.2])).backward()
+    assert torch.allclose(pos.grad, torch.tensor([-0.25, -0.05]))
+    assert torch.allclose(neg.grad, torch.tensor([0.25, 0.05]))
+
+
+def test_pop_weights_hand_computed():
+    # train degrees: item0 = 1, item1 = 3, item2 = 0 (never a positive)
+    items = [0, 1, 1, 1]
+    assert torch.allclose(pop_weights(items, 3, beta=1.0), torch.tensor([1.0, 1 / 3, 1.0]))
+    assert torch.allclose(pop_weights(items, 3, beta=0.5), torch.tensor([1.0, 3 ** -0.5, 1.0]))
+
+
+def test_pop_weights_beta_zero_is_exactly_one_and_popular_items_weigh_less():
+    items = [0, 1, 1, 1, 2, 2]
+    assert torch.equal(pop_weights(items, 3, beta=0.0), torch.ones(3))
+    w = pop_weights(items, 3, beta=0.7)
+    assert w[0] > w[2] > w[1] and torch.isfinite(w).all()  # degrees 1 < 2 < 3

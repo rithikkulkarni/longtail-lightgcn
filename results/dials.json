@@ -1,0 +1,52 @@
+{
+  "tolerance": 0.05,
+  "baseline_val_recall": 0.2416536751896023,
+  "fallback": {
+    "gamma": false,
+    "beta": false
+  },
+  "table": {
+    "gamma": [
+      {
+        "dial": 0.25,
+        "val_recall": 0.23303053920552008,
+        "val_gini": 0.8623376849068809,
+        "within_tolerance": true
+      },
+      {
+        "dial": 0.5,
+        "val_recall": 0.23025126719716768,
+        "val_gini": 0.8645575101053241,
+        "within_tolerance": true
+      },
+      {
+        "dial": 0.75,
+        "val_recall": 0.23084133140902982,
+        "val_gini": 0.8647083617759638,
+        "within_tolerance": true
+      }
+    ],
+    "beta": [
+      {
+        "dial": 0.25,
+        "val_recall": 0.23425672853872456,
+        "val_gini": 0.843982994285265,
+        "within_tolerance": true
+      },
+      {
+        "dial": 0.5,
+        "val_recall": 0.2175779444155744,
+        "val_gini": 0.8690632159054763,
+        "within_tolerance": false
+      },
+      {
+        "dial": 0.75,
+        "val_recall": 0.18590559139864832,
+        "val_gini": 0.9172275181109566,
+        "within_tolerance": false
+      }
+    ]
+  },
+  "gamma": 0.25,
+  "beta": 0.25
+}

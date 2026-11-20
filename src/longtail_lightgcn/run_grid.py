@@ -1,6 +1,7 @@
 """Experiment grid runner (DESIGN.md D-29).
 
-Stage 1 (split 0): baseline, C alone, A alone at each gamma in DIALS, B alone at each beta in DIALS.
+Stage 1 (split 0): baseline, C alone, A alone at each gamma in DIALS, B alone at each beta in DIALS,
+then (last) A at gamma = 1 and B at beta = 1 (EXTRA_DIALS, sweep end-points only).
 Stage 2: the 8 on/off combinations of A, B, C at the chosen gamma*/beta* (results/dials.json) on 2 splits.
 
 Run:  python -m longtail_lightgcn.run_grid --stage 1 --results_dir results     (next unfinished run)
@@ -28,7 +29,8 @@ from longtail_lightgcn.metrics import all_metrics, recommend_top_k, target_mask
 from longtail_lightgcn.run_baseline import git_commit
 from longtail_lightgcn.train import train
 
-DIALS = (0.25, 0.5, 0.75)  # gamma = 1 and beta = 1 were dropped (D-29)
+DIALS = (0.25, 0.5, 0.75)  # the values select_dials.py chooses gamma*/beta* from (D-29)
+EXTRA_DIALS = (1.0,)  # sweep end-points run LAST in stage 1; extend the curves but are never selection candidates
 EPOCHS = 200  # fixed budget for every run (D-29)
 EVAL_EVERY = 10
 NO_EARLY_STOP = 10**9  # patience so large that the best-validation checkpoint is kept without ever stopping
@@ -55,8 +57,10 @@ class RunSpec:
 
 
 def stage1_specs() -> list:
+    # the original 8 runs keep their order, so a resumed session reaches the new runs last: gamma=1, then beta=1
     return ([RunSpec(), RunSpec(use_content=True)]
-            + [RunSpec(gamma=g) for g in DIALS] + [RunSpec(beta=b) for b in DIALS])
+            + [RunSpec(gamma=g) for g in DIALS] + [RunSpec(beta=b) for b in DIALS]
+            + [RunSpec(gamma=g) for g in EXTRA_DIALS] + [RunSpec(beta=b) for b in EXTRA_DIALS])
 
 
 def stage2_specs(gamma: float, beta: float, splits=STAGE2_SPLITS) -> list:

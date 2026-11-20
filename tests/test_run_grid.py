@@ -19,11 +19,13 @@ from longtail_lightgcn.select_dials import main as select_main
 
 # ---- the grid itself (D-29) ----
 
-def test_stage1_is_eight_runs_on_split_zero():
+def test_stage1_is_ten_runs_on_split_zero_with_the_gamma1_beta1_runs_last():
     specs = stage1_specs()
-    assert len(specs) == 8 and {s.split for s in specs} == {0}
-    assert sorted(s.label for s in specs) == ["A", "A", "A", "B", "B", "B", "C", "baseline"]
-    assert len({s.key for s in specs}) == 8
+    assert len(specs) == 10 and {s.split for s in specs} == {0}
+    assert sorted(s.label for s in specs) == ["A"] * 4 + ["B"] * 4 + ["C", "baseline"]
+    assert len({s.key for s in specs}) == 10
+    assert [(s.gamma, s.beta) for s in specs[-2:]] == [(1.0, 0.0), (0.0, 1.0)]  # gamma=1 then beta=1, at the end
+    assert 1.0 not in DIALS  # never a selection candidate
 
 
 def test_stage2_is_the_eight_combinations_on_two_splits():
@@ -34,10 +36,10 @@ def test_stage2_is_the_eight_combinations_on_two_splits():
     assert (abc.gamma, abc.beta, abc.use_content) == (0.5, 0.25, True)
 
 
-def test_stage_overlap_gives_twenty_runs_in_total():
-    # baseline, A, B, C on split 0 are shared, so the whole grid is 8 + 16 - 4 = 20 distinct runs
+def test_stage_overlap_gives_twenty_two_runs_in_total():
+    # baseline, A, B, C on split 0 are shared, so the whole grid is 10 + 16 - 4 = 22 distinct runs
     keys = {s.key for s in stage1_specs()} | {s.key for s in stage2_specs(0.5, 0.25)}
-    assert len(keys) == 20
+    assert len(keys) == 22
 
 
 def test_shared_runs_are_skipped_once_stage1_is_done():
@@ -119,7 +121,7 @@ def test_max_runs_and_max_hours(tiny):
 def test_list_does_not_run_anything(tiny, capsys):
     assert grid(tiny, "--stage", "1", "--list") == []
     out = capsys.readouterr().out
-    assert out.count("pending") == 8 and "0 of 8 runs done" in out
+    assert out.count("pending") == 10 and "0 of 10 runs done" in out
     assert not (tiny[0] / "res" / "results.jsonl").exists()
 
 

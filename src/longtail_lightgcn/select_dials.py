@@ -18,7 +18,9 @@ RECALL = "recall@20"
 
 def select_dials(rows: list, tolerance: float = TOLERANCE, budget: int = EPOCHS) -> dict:
     by_key = {r["key"]: r for r in rows if r["config"]["max_epochs"] == budget}
-    missing = [s.key for s in stage1_specs() if s.key not in by_key]
+    # only the runs the rule reads are required; the gamma=1 / beta=1 end-points (EXTRA_DIALS) are not candidates
+    needed = [s for s in stage1_specs() if s.gamma in (0.0, *DIALS) and s.beta in (0.0, *DIALS)]
+    missing = [s.key for s in needed if s.key not in by_key]
     if missing:
         raise ValueError(f"stage 1 is not finished; missing runs: {missing}")
 

@@ -11,3 +11,4 @@ venv/
 
 # Notebooks
 .ipynb_checkpoints/
+report/*

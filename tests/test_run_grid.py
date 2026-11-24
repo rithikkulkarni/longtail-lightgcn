@@ -28,25 +28,26 @@ def test_stage1_is_ten_runs_on_split_zero_with_the_gamma1_beta1_runs_last():
     assert 1.0 not in DIALS  # never a selection candidate
 
 
-def test_stage2_is_the_eight_combinations_on_two_splits():
+def test_stage2_is_the_eight_combinations_on_three_splits():
     specs = stage2_specs(0.5, 0.25)
-    assert len(specs) == 16 and len({s.key for s in specs}) == 16
+    assert len(specs) == 24 and len({s.key for s in specs}) == 24
+    assert [s.split for s in specs] == [0] * 8 + [1] * 8 + [2] * 8  # split-outer: split 2 is the last to run
     assert sorted({s.label for s in specs}) == sorted(["baseline", "A", "B", "C", "AB", "AC", "BC", "ABC"])
     abc = [s for s in specs if s.label == "ABC"][0]
     assert (abc.gamma, abc.beta, abc.use_content) == (0.5, 0.25, True)
 
 
-def test_stage_overlap_gives_twenty_two_runs_in_total():
-    # baseline, A, B, C on split 0 are shared, so the whole grid is 10 + 16 - 4 = 22 distinct runs
+def test_stage_overlap_gives_thirty_runs_in_total():
+    # baseline, A, B, C on split 0 are shared, so the whole grid is 10 + 24 - 4 = 30 distinct runs
     keys = {s.key for s in stage1_specs()} | {s.key for s in stage2_specs(0.5, 0.25)}
-    assert len(keys) == 22
+    assert len(keys) == 30
 
 
 def test_shared_runs_are_skipped_once_stage1_is_done():
     rows = [{"key": s.key, "config": {"max_epochs": 200}} for s in stage1_specs()]
     done = done_keys(rows)
-    assert len([s for s in stage2_specs(0.5, 0.25) if s.key not in done]) == 12
-    assert len([s for s in stage2_specs(0.25, 0.75) if s.key not in done]) == 12  # any dial in DIALS is shared
+    assert len([s for s in stage2_specs(0.5, 0.25) if s.key not in done]) == 20
+    assert len([s for s in stage2_specs(0.25, 0.75) if s.key not in done]) == 20  # any dial in DIALS is shared
 
 
 def test_smoke_budget_rows_do_not_count_as_done():
@@ -133,7 +134,7 @@ def test_stage2_needs_dials_json_and_uses_it(tiny, capsys):
     (res / "dials.json").write_text(json.dumps({"gamma": 0.5, "beta": 0.25}))
     grid(tiny, "--stage", "2", "--list")
     out = capsys.readouterr().out
-    assert out.count("pending") == 16 and "g0.5_b0.25_c1_s1" in out  # ABC on split 1
+    assert out.count("pending") == 24 and "g0.5_b0.25_c1_s2" in out  # ABC on split 2
 
 
 def test_stage2_reuses_finished_stage1_runs(tiny, capsys):
@@ -143,7 +144,7 @@ def test_stage2_reuses_finished_stage1_runs(tiny, capsys):
     fake = [{"key": s.key, "config": {"max_epochs": 2}} for s in stage1_specs() if s.gamma in (0, 0.5) and s.beta in (0, 0.25)]
     (res / "results.jsonl").write_text("\n".join(json.dumps(r) for r in fake) + "\n")
     grid(tiny, "--stage", "2", "--list")
-    assert "4 of 16 runs done" in capsys.readouterr().out  # baseline, A, B, C on split 0
+    assert "4 of 24 runs done" in capsys.readouterr().out  # baseline, A, B, C on split 0
 
 
 def test_unreadable_line_is_skipped_not_fatal(tiny):

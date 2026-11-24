@@ -2,7 +2,7 @@
 
 Stage 1 (split 0): baseline, C alone, A alone at each gamma in DIALS, B alone at each beta in DIALS,
 then (last) A at gamma = 1 and B at beta = 1 (EXTRA_DIALS, sweep end-points only).
-Stage 2: the 8 on/off combinations of A, B, C at the chosen gamma*/beta* (results/dials.json) on 2 splits.
+Stage 2: the 8 on/off combinations of A, B, C at the chosen gamma*/beta* (results/dials.json) on 3 splits.
 
 Run:  python -m longtail_lightgcn.run_grid --stage 1 --results_dir results     (next unfinished run)
       python -m longtail_lightgcn.run_grid --stage 2 --max_runs 3
@@ -34,7 +34,7 @@ EXTRA_DIALS = (1.0,)  # sweep end-points run LAST in stage 1; extend the curves 
 EPOCHS = 200  # fixed budget for every run (D-29)
 EVAL_EVERY = 10
 NO_EARLY_STOP = 10**9  # patience so large that the best-validation checkpoint is kept without ever stopping
-STAGE2_SPLITS = (0, 1)
+STAGE2_SPLITS = (0, 1, 2)  # split 2 added after the first 20 runs; the loop is split-outer, so split 2 runs last
 # on/off patterns (A, B, C) in the order baseline, A, B, C, AB, AC, BC, ABC
 COMBOS = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1), (1, 1, 1)]
 

@@ -1,4 +1,4 @@
-"""Minimal full-ranking Recall@K (DESIGN.md D-13, D-18). Fuller metrics arrive in M3."""
+"""Full-ranking Recall@K used for validation during training (DESIGN.md D-13, D-18). All five report metrics are in metrics.py."""
 import numpy as np
 import torch
 

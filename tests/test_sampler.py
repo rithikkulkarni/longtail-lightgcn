@@ -1,3 +1,5 @@
+"""Tests for uniform negative sampling with rejection of training positives."""
+
 from pathlib import Path
 
 import numpy as np

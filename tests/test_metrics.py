@@ -1,3 +1,5 @@
+"""Tests for Recall, NDCG, Coverage, ARP and Gini on hand-computed examples."""
+
 import math
 
 import numpy as np

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+figures = ["matplotlib"]  # scripts/make_figures.py and scripts/make_method_figure.py
 
 [tool.setuptools.packages.find]
 where = ["src"]

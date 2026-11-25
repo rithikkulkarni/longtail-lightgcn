@@ -1,3 +1,5 @@
+"""End-to-end test of the single-run command-line script."""
+
 import json
 
 import numpy as np

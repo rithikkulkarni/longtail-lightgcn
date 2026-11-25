@@ -1,3 +1,5 @@
+"""Tests for the normalized adjacency, including the degree discount of Intervention A."""
+
 from pathlib import Path
 
 import numpy as np

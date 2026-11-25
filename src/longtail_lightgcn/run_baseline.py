@@ -35,6 +35,7 @@ def _str_to_bool(s: str) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Command-line parser with one flag for every TrainConfig field."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data_dir", default="data/processed")
     ap.add_argument("--out_dir", default="results/baseline")
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> dict:
+    """Train one configuration on one split, evaluate the test set once, and save results.json and model.pt."""
     args = build_parser().parse_args(argv)
     overrides = {f.name: getattr(args, f.name) for f in fields(TrainConfig) if getattr(args, f.name) is not None}
     cfg = TrainConfig(**overrides)

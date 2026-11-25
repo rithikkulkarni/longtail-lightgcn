@@ -21,6 +21,7 @@ class LightGCN(nn.Module):
         item_features: torch.Tensor | None = None,
         mlp_hidden: int = 64,
     ):
+        """Create the ID embedding tables and, if item_features is given, the content MLP of Intervention C."""
         super().__init__()
         self.n_users, self.n_items, self.n_layers = n_users, n_items, n_layers
         self.user_emb = nn.Embedding(n_users, embed_dim)

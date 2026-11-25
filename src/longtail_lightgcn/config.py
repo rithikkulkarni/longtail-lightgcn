@@ -5,6 +5,7 @@ from dataclasses import dataclass
 @dataclass
 class TrainConfig:
     # model
+    """All settings of one training run. The defaults are the baseline (interventions A, B, C off)."""
     embed_dim: int = 64
     n_layers: int = 3
     init_std: float = 0.01  # Normal(0, init_std), as in the authors' official code (D-14)

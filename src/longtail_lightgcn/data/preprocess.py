@@ -87,6 +87,7 @@ def make_split(users: np.ndarray, items: np.ndarray, seed: int) -> dict:
 
 
 def save_split(path: Path, split: dict, n_users: int, n_items: int) -> None:
+    """Write one split's edge arrays and the user/item counts to an .npz file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(path, n_users=n_users, n_items=n_items, **split)
@@ -100,6 +101,7 @@ def load_split(path: Path):
 
 
 def save_id_maps(path: Path, user_ids: np.ndarray, item_ids: np.ndarray) -> None:
+    """Write the arrays that map model indices back to the original MovieLens user and movie IDs."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(path, user_ids=user_ids, item_ids=item_ids)

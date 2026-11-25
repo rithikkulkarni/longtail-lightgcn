@@ -1,4 +1,5 @@
-"""Training loop for baseline LightGCN with BPR loss, validation-based early stopping (D-12, D-16)."""
+"""Training loop for LightGCN (baseline and interventions A, B, C): BPR loss, uniform negative sampling,
+and selection of the checkpoint with the best validation Recall@K (D-12, D-16)."""
 import copy
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from longtail_lightgcn.sampler import NegativeSampler
 
 @dataclass
 class TrainResult:
+    """Outcome of a training run: the best-validation model, its adjacency matrix and the validation history."""
     model: LightGCN  # holds the BEST weights (by validation Recall@K), not the last ones
     adj: torch.Tensor
     best_epoch: int

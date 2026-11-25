@@ -16,6 +16,7 @@ GREEN, GREEN_EDGE = "#e5f1da", "#4f7f2a"
 
 
 def box(ax, x, y, w, h, title, body, added=False):
+    """Draw one titled stage box; added=True uses the intervention colour."""
     ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.12",
                                 facecolor=GREEN if added else GRAY, edgecolor=GREEN_EDGE if added else GRAY_EDGE,
                                 linewidth=1.3 if added else 0.9))
@@ -24,11 +25,13 @@ def box(ax, x, y, w, h, title, body, added=False):
 
 
 def arrow(ax, start, end, added=False):
+    """Draw an arrow between two points; added=True uses the intervention colour."""
     ax.add_patch(FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=10, linewidth=1.0,
                                  color=GREEN_EDGE if added else "#444444", shrinkA=0, shrinkB=0))
 
 
 def main(argv=None) -> None:
+    """Command-line entry point: draw and save the method overview figure."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out_dir", default="report/figures")
     args = ap.parse_args(argv)

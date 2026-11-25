@@ -1,3 +1,5 @@
+"""Tests for LightGCN propagation and scoring on a tiny hand-computed graph."""
+
 import numpy as np
 import torch
 

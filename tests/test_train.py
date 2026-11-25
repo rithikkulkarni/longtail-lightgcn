@@ -1,3 +1,5 @@
+"""Tests for the training loop and checkpoint selection."""
+
 import math
 
 import numpy as np

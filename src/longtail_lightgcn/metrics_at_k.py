@@ -55,6 +55,7 @@ def check_against_stored(computed_at_20: dict, stored_test: dict, key: str, tol:
 
 
 def build_table(results_dir: Path, data_dir: Path, ks=KS, tol: float = TOLERANCE):
+    """Metrics at every K for every finished run, checked at K = 20 against results.jsonl. Returns (table, largest K=20 difference, number of runs)."""
     rows = [r for r in read_rows(Path(results_dir) / "results.jsonl") if r["config"]["max_epochs"] == EPOCHS]
     seen, unique = set(), []
     for r in rows:  # a key should appear once; keep the first if a session was ever repeated
@@ -84,6 +85,7 @@ def build_table(results_dir: Path, data_dir: Path, ks=KS, tol: float = TOLERANCE
 
 
 def main(argv=None) -> pd.DataFrame:
+    """Command-line entry point: build the table and write it to metrics_at_k.csv."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results_dir", default="results")
     ap.add_argument("--data_dir", default="data/processed")

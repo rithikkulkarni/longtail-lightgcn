@@ -41,6 +41,7 @@ COMBOS = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 
 
 @dataclass(frozen=True)
 class RunSpec:
+    """One run of the experiment grid: which interventions are on, their strengths, and the split."""
     gamma: float = 0.0  # intervention A is on when > 0
     beta: float = 0.0  # intervention B is on when > 0
     use_content: bool = False  # intervention C
@@ -48,26 +49,31 @@ class RunSpec:
 
     @property
     def key(self) -> str:
+        """Unique run identifier, e.g. g0.25_b0_c1_s2 (gamma, beta, content flag, split)."""
         return f"g{self.gamma:g}_b{self.beta:g}_c{int(self.use_content)}_s{self.split}"
 
     @property
     def label(self) -> str:
+        """Which interventions are on: 'baseline', 'A', 'B', 'C', 'AB', ..., 'ABC'."""
         on = ("A" if self.gamma > 0 else "") + ("B" if self.beta > 0 else "") + ("C" if self.use_content else "")
         return on or "baseline"
 
 
 def stage1_specs() -> list:
     # the original 8 runs keep their order, so a resumed session reaches the new runs last: gamma=1, then beta=1
+    """Stage 1 runs on split 0: baseline, C, the A and B dial sweeps, then the gamma = 1 and beta = 1 end-points."""
     return ([RunSpec(), RunSpec(use_content=True)]
             + [RunSpec(gamma=g) for g in DIALS] + [RunSpec(beta=b) for b in DIALS]
             + [RunSpec(gamma=g) for g in EXTRA_DIALS] + [RunSpec(beta=b) for b in EXTRA_DIALS])
 
 
 def stage2_specs(gamma: float, beta: float, splits=STAGE2_SPLITS) -> list:
+    """Stage 2 runs: the 8 on/off combinations at the given gamma and beta, one split at a time."""
     return [RunSpec(gamma * a, beta * b, bool(c), s) for s in splits for a, b, c in COMBOS]
 
 
 def read_rows(path: Path) -> list:
+    """Read results.jsonl into a list of dicts; unreadable lines are skipped with a warning."""
     if not Path(path).exists():
         return []
     rows = []
@@ -95,6 +101,7 @@ def done_keys(rows: list, budget: int = EPOCHS) -> set:
 
 
 def load_dials(results_dir: Path) -> dict:
+    """Read the chosen gamma* and beta* from dials.json; exit with instructions if it is missing."""
     path = Path(results_dir) / "dials.json"
     if not path.exists():
         raise SystemExit(f"{path} not found. Finish stage 1, run `python -m longtail_lightgcn.select_dials`, "
@@ -103,6 +110,7 @@ def load_dials(results_dir: Path) -> dict:
 
 
 def run_one(spec: RunSpec, data_dir: Path, results_dir: Path, device: str, max_epochs: int, features) -> dict:
+    """Train one run, compute validation and test metrics from the best checkpoint, save its test top-K lists, and return the results row."""
     cfg = TrainConfig(gamma=spec.gamma, beta=spec.beta, use_content=spec.use_content, split_seed=spec.split,
                       seed=spec.split, max_epochs=max_epochs, eval_every=EVAL_EVERY, patience=NO_EARLY_STOP)
     split, n_users, n_items = load_split(Path(data_dir) / f"split_{spec.split}.npz")
@@ -143,6 +151,7 @@ def run_one(spec: RunSpec, data_dir: Path, results_dir: Path, device: str, max_e
 
 
 def main(argv=None) -> list:
+    """Command-line entry point: list, or train, the next unfinished runs of a stage."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stage", type=int, choices=(1, 2), required=True)
     ap.add_argument("--results_dir", default="results")

@@ -16,6 +16,7 @@ from longtail_lightgcn.data.preprocess import (
 
 
 def main() -> None:
+    """Download ML-1M, build the edge list, and save the splits and item metadata."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw-dir", default="data/raw")
     ap.add_argument("--out-dir", default="data/processed")

@@ -1,3 +1,5 @@
+"""Tests for the BPR loss, popularity weights (Intervention B) and the L2 term."""
+
 import math
 
 import torch

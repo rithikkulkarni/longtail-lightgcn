@@ -87,21 +87,25 @@ def pareto_frontier(points: dict) -> list:
 # ---------------------------------------------------------------- LaTeX helpers
 
 def num(x: float, d: int) -> str:
+    """Format a number with d decimals."""
     return f"{x:.{d}f}"
 
 
 def pm(mean: float, std: float, d: int, with_std: bool) -> str:
+    """LaTeX cell 'mean +/- std', or the mean alone when std is hidden or undefined."""
     if not with_std or np.isnan(std):
         return num(mean, d)
     return f"{num(mean, d)}{{\\scriptsize\\,$\\pm$\\,{num(std, d)}}}"
 
 
 def signed(x: float, d: int = 1) -> str:
+    """Format a percent change with an explicit plus or minus sign."""
     s = f"{abs(x):.{d}f}"
     return ("$-$" if x < 0 and float(s) != 0 else "+") + s
 
 
 def write_table(path: Path, body: str) -> None:
+    """Write a LaTeX table to disk, creating the folder if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body + "\n", encoding="utf-8")
 
@@ -109,6 +113,7 @@ def write_table(path: Path, body: str) -> None:
 # ---------------------------------------------------------------- outputs
 
 def results_table(summary: pd.DataFrame, k: int, n: int, with_std: bool) -> str:
+    """LaTeX table of all five metrics for the 8 configurations at one K; best value per column in bold."""
     best = {}
     for col, (_, d, higher) in COLUMNS.items():
         means = summary[(col, "mean")].round(d)
@@ -141,6 +146,7 @@ def results_table(summary: pd.DataFrame, k: int, n: int, with_std: bool) -> str:
 
 
 def delta_table(pc: pd.DataFrame, k: int, n: int, with_std: bool) -> str:
+    """LaTeX table of percent change in Recall and Gini against the baseline at one K."""
     lines = []
     for label in ORDER[1:]:
         cells = [label]
@@ -169,6 +175,7 @@ def delta_table(pc: pd.DataFrame, k: int, n: int, with_std: bool) -> str:
 
 
 def dial_sweep_table(results_dir: Path, dials: dict) -> str:
+    """LaTeX table of the stage 1 dial sweep (validation, split 0); chosen dials in bold."""
     rows = {}
     for line in (Path(results_dir) / "results.jsonl").read_text().splitlines():
         if line.strip():
@@ -217,6 +224,7 @@ def label_offset(label: str, points: dict) -> tuple:
 
 
 def pareto_figure(df: pd.DataFrame, k: int, splits: list, out_base: Path) -> None:
+    """Plot Recall@K against Gini (means and per-split points) with the Pareto frontier."""
     sub = df[df["k"] == k]
     means = sub.groupby("label")[["gini", "recall"]].mean().reindex(ORDER)
     points = {lab: (means.loc[lab, "gini"], means.loc[lab, "recall"]) for lab in ORDER}
@@ -249,6 +257,7 @@ def pareto_figure(df: pd.DataFrame, k: int, splits: list, out_base: Path) -> Non
 
 
 def main(argv=None) -> None:
+    """Command-line entry point: write every result table and figure."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results_dir", default="results")
     ap.add_argument("--out_dir", default="report")

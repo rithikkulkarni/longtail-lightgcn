@@ -10,6 +10,7 @@ class NegativeSampler:
     """
 
     def __init__(self, train_users, train_items, n_users: int, n_items: int, seed: int = 0):
+        """Index the training edges for fast membership tests and seed the random generator."""
         train_users = np.asarray(train_users, dtype=np.int64)
         train_items = np.asarray(train_items, dtype=np.int64)
 
@@ -27,6 +28,7 @@ class NegativeSampler:
         self._rng = np.random.default_rng(seed)
 
     def _is_train_edge(self, users: np.ndarray, items: np.ndarray) -> np.ndarray:
+        """Boolean array: whether each (user, item) pair is a training edge (binary search)."""
         keys = users * self.n_items + items
         pos = np.searchsorted(self._keys, keys)
         pos = np.minimum(pos, len(self._keys) - 1)  # searchsorted can return len(keys)

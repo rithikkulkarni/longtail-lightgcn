@@ -1,3 +1,5 @@
+"""Tests for full-ranking Recall@K and its train/validation masking."""
+
 import math
 from pathlib import Path
 
